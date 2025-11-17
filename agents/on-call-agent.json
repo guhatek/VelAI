@@ -1,0 +1,2216 @@
+{
+  "name": "VelAI - On-Call SRE CoPilot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stop-bot",
+        "options": {}
+      },
+      "id": "3def84db-13c9-4268-ac75-86c77cd75681",
+      "name": "Stop On call Agent Bot Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        48,
+        3232
+      ],
+      "webhookId": "ee903923-4b90-4d42-b6f2-88f6c51878bb"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "442c4730-1d0e-4d61-96cd-e1081d3e7c12",
+      "name": "Slack Notification on workflow start for removing bot from meeting",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        560,
+        3232
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const segments = $json.segments || $json.body?.segments || [];\n\nfunction formatTimestampToIST(utcTimestamp) {\n  const date = new Date(utcTimestamp); // works for epoch or ISO string\n  const istDate = new Date(date.toLocaleString(\"en-US\", { timeZone: \"Asia/Kolkata\" }));\n\n  const hh = String(istDate.getHours()).padStart(2, '0');\n  const mm = String(istDate.getMinutes()).padStart(2, '0');\n  const ss = String(istDate.getSeconds()).padStart(2, '0');\n\n  return `${hh}:${mm}:${ss}`;\n}\n\n\nconst formatted = segments.map(seg => {\n  const timestampRaw = seg.absolute_start_time || seg.start_time || seg.startTime || 'timestamp not available';\n  \n  let timestamp = 'timestamp not available';\n  if (timestampRaw !== 'timestamp not available') {\n    timestamp = formatTimestampToIST(timestampRaw);\n  }\n\n  const text = seg.text?.trim() || '';\n\n  return `- ${timestamp}: ${text}`;\n}).join('\\n');\n\nconst speakers = new Set(segments.map(s => s.speaker).filter(Boolean));\nconst emptyMeeting = speakers.size <= 1;\n\nreturn [{ json: { transcriptFormatted: formatted, emptyMeeting } }];\n"
+      },
+      "id": "64c5c713-a22a-440d-9928-159e4489c72e",
+      "name": "Format Transcript to create RCA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        3232
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "content",
+              "value": "={{ $json.transcriptFormatted }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "47b335e3-5a9c-4b0d-9fc7-f5f55fca9af1",
+      "name": "Reading Transcripts",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        3232
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    prompt: `You are a Root Cause Analysis (RCA) expert. Given this incident transcript with explicit timestamps, analyze and provide a detailed RCA in the following structured format:\n\n1. Problem Statement\n- List key problem points as bullet points.\n\n2. Timeline of Events\n- Each key event should be a bullet point in the following format:\n  HH:mm: Event description\n- Ensure actual timestamps from the transcript are used.\n\n3. Contributing Factors\n- List contributing factors as bullet points.\n\n4. Root Cause\n- List root causes as bullet points.\n\n5. Corrective Actions\n- List corrective actions as bullet points.\n\n6. Preventive Measures\n- List preventive measures as bullet points.\n\nInstructions:\n- Do NOT use markdown or special characters except '- ' as the bullet symbol.\n- Keep the timestamps verbatim as present in the transcript.\n- Each section should start with its title followed by bulleted lines.\n- Use plain text only.\n\nIncident Transcript:\n${$('Reading Transcripts').item.json.content}`\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        3232
+      ],
+      "id": "f4d87000-3b60-425c-9adc-c279bb6e529f",
+      "name": "RCA template / Prompt creation"
+    },
+    {
+      "parameters": {
+        "chunkOverlap": 400,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainSummarization",
+      "typeVersion": 2.1,
+      "position": [
+        1856,
+        3232
+      ],
+      "id": "683dfe5a-0d5a-4488-a2ad-af1a51c87cd5",
+      "name": "Summarize transcripts to create summary"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2544,
+        3232
+      ],
+      "id": "a5792c8e-30bc-42fc-bc12-8d9098b29c28",
+      "name": "Create RCA based on summary provided"
+    },
+    {
+      "parameters": {
+        "jsCode": "// const text = $input.first().json.text || '';\n// console.log(\"INPUT TEXT:\\n\", text);\n\n// // Use simple string splits instead of complex regex\n// let correctiveSection = '';\n// let preventiveSection = '';\n\n// // Try to split based on the headers manually\n// const correctiveIndex = text.indexOf('Corrective Actions');\n// const preventiveIndex = text.indexOf('Preventive Measures');\n\n// if (correctiveIndex !== -1 && preventiveIndex !== -1) {\n//   correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length, preventiveIndex).trim();\n//   preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n// } else if (correctiveIndex !== -1) {\n//   correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length).trim();\n// } else if (preventiveIndex !== -1) {\n//   preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n// }\n\n// // Split lines (assuming they're numbered or bullet points)\n// function extractItems(sectionText) {\n//   return sectionText\n//     .split(/\\n|\\d+\\.\\s+|-\\s+/)\n//     .map(line => line.trim())\n//     .filter(line => line.length > 5);\n// }\n\n// const items = [\n//   ...extractItems(correctiveSection),\n//   ...extractItems(preventiveSection)\n// ];\n\n// console.log(\"EXTRACTED ITEMS:\\n\", items);\n\n// return items.map(item => ({ json: { summary: item } }));\n\n\n\n\n// const text = $input.first().json.text || '';\n// console.log(\"INPUT TEXT:\\n\", text);\n\n// // Extract \"Corrective Actions\" and \"Preventive Measures\"\n// let correctiveSection = '';\n// let preventiveSection = '';\n\n// const correctiveIndex = text.indexOf('Corrective Actions');\n// const preventiveIndex = text.indexOf('Preventive Measures');\n\n// if (correctiveIndex !== -1 && preventiveIndex !== -1) {\n//   correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length, preventiveIndex).trim();\n//   preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n// } else if (correctiveIndex !== -1) {\n//   correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length).trim();\n// } else if (preventiveIndex !== -1) {\n//   preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n// }\n\n// // Combine just the two relevant sections\n// const combinedSection = `${correctiveSection}\\n${preventiveSection}`.trim();\n\n// // Extract bullet points (items starting with '* ')\n// const items = combinedSection\n//   .split('\\n')\n//   .map(line => line.trim())\n//   .filter(line => line.startsWith('*'))              // Only bullet points\n//   .map(line => line.replace(/^\\*\\s*/, ''))           // Remove '* ' from start\n//   .filter(line => line.length > 10);                 // Skip short lines\n\n// console.log(\"EXTRACTED ACTION ITEMS:\\n\", items);\n\n// // Return array of action items, each to become a JIRA ticket\n// return items.map(item => ({\n//   json: {\n//     summary: item\n//   }\n// }));\n\n\n\n\n\n// const text = $input.first().json.text || '';\n\n// let correctiveSection = '';\n// let preventiveSection = '';\n\n// const correctiveIndex = text.indexOf('Corrective Actions');\n// const preventiveIndex = text.indexOf('Preventive Measures');\n\n// if (correctiveIndex !== -1 && preventiveIndex !== -1) {\n//   correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length, preventiveIndex).trim();\n//   preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n// } else if (correctiveIndex !== -1) {\n//   correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length).trim();\n// } else if (preventiveIndex !== -1) {\n//   preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n// }\n\n// function extractItems(sectionText) {\n//   return sectionText\n//     .split(/\\n|•|\\d+\\.\\s+|-\\s+/)\n//     .map(line => line.trim())\n//     .filter(line => line.length > 10);\n// }\n\n// function truncate(text, limit = 255) {\n//   if (text.length <= limit) return text;\n//   const trimmed = text.slice(0, limit);\n//   const lastPeriod = trimmed.lastIndexOf('.');\n//   return (lastPeriod > 100 ? trimmed.slice(0, lastPeriod + 1) : trimmed).trim() + '...';\n// }\n\n// // Combine corrective and preventive items\n// let items = [\n//   ...extractItems(correctiveSection),\n//   ...extractItems(preventiveSection)\n// ];\n\n// // Define exclusion phrases (generic/planning/framework stuff)\n// const exclusionPatterns = [\n//   /framework/i,\n//   /continuous monitoring/i,\n//   /capacity planning/i,\n//   /incident response plan/i,\n//   /security awareness training/i,\n//   /regular security audits/i,\n//   /penetration testing/i,\n//   /template/i,\n//   /general recommendation/i,\n//   /overall strategy/i\n// ];\n\n// // Filter out non-actionable items\n// items = items.filter(item => {\n//   return !exclusionPatterns.some(pattern => pattern.test(item));\n// });\n\n// // Remove duplicates\n// const uniqueItems = [...new Set(items)];\n\n// // Return actionable items with truncation\n// return uniqueItems.map(item => ({\n//   json: {\n//     summary: truncate(item)\n//   }\n// }));\n\n\nconst text = $input.first().json.text || '';\n\n// Extract sections\nlet correctiveSection = '';\nlet preventiveSection = '';\n\nconst correctiveIndex = text.indexOf('Corrective Actions');\nconst preventiveIndex = text.indexOf('Preventive Measures');\n\nif (correctiveIndex !== -1 && preventiveIndex !== -1) {\n  correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length, preventiveIndex).trim();\n  preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n} else if (correctiveIndex !== -1) {\n  correctiveSection = text.slice(correctiveIndex + 'Corrective Actions'.length).trim();\n} else if (preventiveIndex !== -1) {\n  preventiveSection = text.slice(preventiveIndex + 'Preventive Measures'.length).trim();\n}\n\n// Helper: Remove unwanted characters\nfunction cleanText(line) {\n  return line\n    .replace(/^[-*•]\\s*/, '')  // Remove leading bullet characters\n    .replace(/\\s{2,}/g, ' ')   // Collapse multiple spaces\n    .trim();\n}\n\n// Extract paragraphs (by double newline or single newline)\nfunction extractParagraphs(sectionText) {\n  return sectionText\n    .split(/\\n{1,2}/)          // Split by newlines\n    .map(line => cleanText(line))\n    .filter(line => line.length > 20);  // Only keep meaningful lines\n}\n\nfunction truncate(text, limit = 255) {\n  if (text.length <= limit) return text;\n  const trimmed = text.slice(0, limit);\n  const lastPeriod = trimmed.lastIndexOf('.');\n  return (lastPeriod > 100 ? trimmed.slice(0, lastPeriod + 1) : trimmed).trim() + '...';\n}\n\n// Combine items from both sections\nlet items = [\n  ...extractParagraphs(correctiveSection),\n  ...extractParagraphs(preventiveSection)\n];\n\n// Filter out generic or non-actionable items\nconst exclusionPatterns = [\n  /framework/i,\n  /continuous monitoring/i,\n  /capacity planning/i,\n  /incident response plan/i,\n  /security awareness training/i,\n  /regular security audits/i,\n  /penetration testing/i,\n  /template/i,\n  /general recommendation/i,\n  /smoke test/i,\n  /overall strategy/i,\n  /validation/i,\n  /status update/i\n];\n\nitems = items.filter(item => !exclusionPatterns.some(pattern => pattern.test(item)));\n\n// Remove duplicates\nconst uniqueItems = [...new Set(items)];\n\n// Return plain text summaries\nreturn uniqueItems.map(item => ({\n  json: {\n    summary: truncate(item)\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        3392
+      ],
+      "id": "16b63192-d2d7-4ab2-8190-de4df9d37ecc",
+      "name": "Get action items"
+    },
+    {
+      "parameters": {
+        "project": {
+          "__rl": true,
+          "value": "10067",
+          "mode": "list",
+          "cachedResultName": "Test-Malavika"
+        },
+        "issueType": {
+          "__rl": true,
+          "value": "10073",
+          "mode": "list",
+          "cachedResultName": "Submit a request or incident"
+        },
+        "summary": "={{ $json.summary }}",
+        "additionalFields": {
+          "description": "={{ $json.summary }}"
+        }
+      },
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [
+        3232,
+        3392
+      ],
+      "id": "88b3ba25-2408-43cb-bb4f-3b203fdcb51d",
+      "name": "Create action items in JIRA project",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "fileSelector": "/tmp/slack_trigger_time.json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2176,
+        3632
+      ],
+      "id": "1b891b3a-4fb7-4153-a8d7-12a699c194ca",
+      "name": "Read the incident start time file"
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        2400,
+        3632
+      ],
+      "id": "191d606d-724e-4425-a341-8bf32da82c00",
+      "name": "Extract time stamp from the previous file"
+    },
+    {
+      "parameters": {
+        "jsCode": "let predictedEndTimeUTC = null;\nlet predictedEndTimeIST = null;\n\ntry {\n  const showFileNode = $input.first().json.transcriptFormatted;\n  const summarizationNode = $('Summarize transcripts to create summary');\n\n  const transcript = (showFileNode?.item?.json?.content \n                      || summarizationNode?.item?.json?.output?.text\n                      || \"\").toString();\n\n  const closureKeywords = [\n    \"incident resolved\", \n    \"issue resolved\", \n    \"service restored\", \n    \"problem fixed\",\n    \"system recovered\",\n    \"incident recovered\",\n    \"ticket closed\"\n  ];\n\n  if (transcript) {\n    const lines = transcript.split(\"\\n\");\n    for (let i = lines.length - 1; i >= 0; i--) {\n      const line = lines[i].toLowerCase();\n      if (closureKeywords.some(keyword => line.includes(keyword))) {\n        const tsMatch = line.match(/\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}/); \n        predictedEndTimeUTC = tsMatch ? tsMatch[0] : new Date().toISOString();\n        break;\n      }\n    }\n  }\n\n  if (!predictedEndTimeUTC) predictedEndTimeUTC = new Date().toISOString();\n\n  // Convert to IST\n  const dateObj = new Date(predictedEndTimeUTC);\n  const offsetIST = 5.5 * 60; // minutes\n  predictedEndTimeIST = new Date(dateObj.getTime() + offsetIST * 60000)\n                          .toISOString()\n                          .replace('Z', '+05:30');\n\n} catch (err) {\n  // If node is empty or invalid, fallback to current time\n  predictedEndTimeUTC = new Date().toISOString();\n  const dateObj = new Date(predictedEndTimeUTC);\n  const offsetIST = 5.5 * 60;\n  predictedEndTimeIST = new Date(dateObj.getTime() + offsetIST * 60000)\n                          .toISOString()\n                          .replace('Z', '+05:30');\n}\n\nreturn [{ json: { predictedEndTimeUTC, predictedEndTimeIST } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        4032
+      ],
+      "id": "4068dea9-51ef-4e1c-b150-587303598409",
+      "name": "Predict end time based on summary"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<slack channel ID>/<slack webhook ID>",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify({ text: $json[\"text\"] }) }}\n"
+      },
+      "name": "Post RCA in rca channel (Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        3168,
+        3072
+      ],
+      "id": "af273978-c3fa-4170-896f-05ef163b39c0"
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "http://vexa-local.mylab.com/bots/google_meet/dxi-jxgy-zrh",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "<vexa-api-key>"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6ec39dfc-186f-46c9-a77b-2f21a4e8c862",
+      "name": "Remove On call Agent from the meeting1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        288,
+        3232
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://vexa-local.mylab.com/transcripts/google_meet/dxi-jxgy-zrh",
+        "options": {
+          "fullResponse": true
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "X-API-Key",
+              "value": "<vexa-api-key>"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        816,
+        3232
+      ],
+      "id": "f85743a4-2d96-405a-bca9-731186844aa4",
+      "name": "Get On Call Agent Transcript for RCA"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- Safe transcript fetch ---\nlet transcript = \"No transcript available\";\ntry {\n  const summNode = $('Summarize transcripts to create summary')?.item?.json;\n  if (summNode?.output?.text) {\n    transcript = summNode.output.text;\n  }\n} catch (e) {\n  transcript = \"No transcript available\";\n}\n\n// --- Safe time fetch ---\n// const inputData = $input.first()?.json || {};\nconst triggerTimeUTC = $input.first().json.data.triggerTime\nconst predictedNode = $node['Predict end time based on summary'].json;\nconst endTimeUTC = predictedNode.predictedEndTimeUTC || \"Unknown\";\n\n// --- Convert UTC to IST (UTC+5:30) ---\nfunction toIST(utcString, returnTimeOnly = false) {\n  try {\n    const date = new Date(utcString);\n    const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);\n\n    if (returnTimeOnly) {\n      return istDate.toTimeString().split(' ')[0]; // HH:MM:SS\n    } else {\n      const yyyy = istDate.getFullYear();\n      const mm = String(istDate.getMonth() + 1).padStart(2, '0');\n      const dd = String(istDate.getDate()).padStart(2, '0');\n      const hh = String(istDate.getHours()).padStart(2, '0');\n      const min = String(istDate.getMinutes()).padStart(2, '0');\n      const ss = String(istDate.getSeconds()).padStart(2, '0');\n      return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;\n    }\n  } catch (err) {\n    return new Date().toISOString(); // fallback\n  }\n}\n\n// --- Convert start/end times ---\nconst startTimeIST = toIST(triggerTimeUTC);\nconst endTimeIST = toIST(endTimeUTC)\n\n// --- RCA Prompt ---\nconst rcaPrompt = `You are a Root Cause Analysis (RCA) expert. Given an incident transcript summary, analyze and produce a structured report in the following format:\n\nSummary:   \n<Short summary of the incident>\n\nStart Time:   ${startTimeIST} IST\nEnd Time:   ${endTimeIST} IST\nDuration:   <Compute duration from Start Time to End Time>\n\nImpacts:   <Describe any service impacts or \"No Impact\">\n\nNote:   <Additional remarks>\n\nIncident Transcript Summary:\n${transcript}`;\n\nreturn [{\n  json: {\n    rcaPrompt,\n    startTimeIST,\n    endTimeIST,\n    transcript\n  }\n}];\n\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2992,
+        4032
+      ],
+      "id": "02ad4068-a0a3-4987-bfad-5c2434e06afe",
+      "name": "Timestamp and Prompt for RCA summary1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2688,
+        4032
+      ],
+      "id": "8b235397-62b0-4f9d-bb83-ba3e3bcb9271",
+      "name": "Merge outputs from previous nodes"
+    },
+    {
+      "parameters": {
+        "content": "## Slack message trigger",
+        "height": 720,
+        "width": 3248
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 1,
+      "id": "287c1958-0609-490c-99ff-264d475acd1a",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Slack - button webhook",
+        "height": 1344,
+        "width": 2144
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -16,
+        1552
+      ],
+      "typeVersion": 1,
+      "id": "fb1d175e-ecc2-4d90-a01c-e05ae8e540bf",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "model": "gpt-5",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        1856,
+        3440
+      ],
+      "id": "57a3b4e7-0cc1-4368-8956-297eeb543dc5",
+      "name": "Azure OpenAI Chat Model1"
+    },
+    {
+      "parameters": {
+        "model": "gpt-5",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2592,
+        3440
+      ],
+      "id": "33cd453c-dc5c-4207-b3bb-dda1565b92f5",
+      "name": "Azure OpenAI Chat Model2"
+    },
+    {
+      "parameters": {
+        "model": "gpt-5",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        3424,
+        4240
+      ],
+      "id": "5486a41c-a066-4412-a4d6-0effcd4129ba",
+      "name": "Azure OpenAI Chat Model3"
+    },
+    {
+      "parameters": {
+        "content": "## Sending Summary every 5 minutes\n",
+        "height": 592,
+        "width": 3728
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        832
+      ],
+      "typeVersion": 1,
+      "id": "b38a4ff9-8f4a-4c2b-aa26-74649438a8d2",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## RCA Agent",
+        "height": 1456,
+        "width": 4272
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -16,
+        3008
+      ],
+      "typeVersion": 1,
+      "id": "3b97ada6-f92c-4d36-b0a4-5fe41fbb3d75",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "fromEmail": "hello@guhatek.com",
+        "toEmail": "im@guhatek.com",
+        "subject": "Incident RCA",
+        "html": "={{ $('Create RCA').item.json.text.replace(/\\n/g, '<br>') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        3760,
+        4288
+      ],
+      "id": "1ad469ef-bc39-4617-a769-f3e02193b426",
+      "name": "Send email",
+      "webhookId": "b6139b81-0ffb-45f1-84e5-857cb5c0b104"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { botRunning: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        304
+      ],
+      "id": "339e6e2c-e0d9-43f6-a7ea-460679696fa1",
+      "name": "Set Bot Running2"
+    },
+    {
+      "parameters": {
+        "trigger": [
+          "app_mention"
+        ],
+        "channelId": {
+          "__rl": true,
+          "value": "C0904NQPWMB",
+          "mode": "list",
+          "cachedResultName": "incident-page"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.slackTrigger",
+      "typeVersion": 1,
+      "position": [
+        64,
+        304
+      ],
+      "id": "69a74885-479d-46ec-b7b8-05f4274a76ed",
+      "name": "On Call Agent Mentioned in an Incident",
+      "webhookId": "46915833-226f-4bec-969d-453fd3281899"
+    },
+    {
+      "parameters": {
+        "jsCode": "// // return [{ json: { triggerTime: new Date().toISOString() } }];\n// const meetingId = $input.first().json.meetingId;\n// const triggerTime = new Date().toISOString();\n\n// return [{\n//   json: {\n//     triggerTime,\n//     meetingId\n//   }\n// }];\n\n// --- Step 1: get the text input ---\n// const raw = ($input.first().json.text || \"\").toString().trim();\nconst raw = (($json.event && $json.event.text) || $json.text || \"\").toString().trim();\n\nconst triggerTime = new Date().toISOString();\n\n// Helper: safe regex match\nfunction first(re, s = raw) {\n  const m = s.match(re);\n  return m ? (m[1] || m[0]) : null;\n}\n\n// --- Step 2: extract fields (robust for both Slack + plain styles) ---\nconst meetUrl = first(/<?(https:\\/\\/meet\\.google\\.com\\/[a-z0-9-]+)(?:\\?[^\\s>]+)?>/i);\nconst meetingId = first(/https:\\/\\/meet\\.google\\.com\\/([a-z0-9-]+)/i);\n\nconst incidentLink = first(/<?(https?:\\/\\/[^>\\s]*opsgenie\\.com\\/incident\\/detail\\/[a-f0-9-]+)>?/i);\nconst transcriptLink = first(/<?(https?:\\/\\/[^>\\s]*atlassian\\.net\\/[^\\s>]+)>?/i);\n\nlet priority =\n  first(/\\*?Priority:\\*?\\s*(P[0-9])/i) ||\n  first(/\\binvestigating (?:a|an)\\s*(P[0-9])\\b/i) ||\n  first(/\\[(P[0-9])\\]/i) ||\n  null;\n\nlet summary = first(/\\*Summary:\\*\\s*(.+?)\\n/i) ||\n               first(/Summary:\\s*(.+?)\\n/i);\nlet title = first(/(?:^|\\n)\\s*Title:\\s*(.+?)\\n/i);\n\n// fallback\nif (!summary && title) summary = title;\nif (summary && !title) title = summary;\n\npriority = priority ? priority.toUpperCase() : \"Unknown\";\nsummary = (summary || \"\").replace(/\\*/g, \"\").trim();\ntitle = (title || \"\").replace(/\\*/g, \"\").trim();\n\n// --- Step 3: output final JSON record for file storage ---\nreturn [{\n  json: {\n    triggerTime,\n    priority,\n    summary,\n    title,\n    meetingId,\n    meetingUrl: meetUrl,\n    incidentLink,\n    transcriptLink\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        304
+      ],
+      "id": "f18a67fa-979f-41ef-9109-8cda5ccc67fe",
+      "name": "Capture Incident Start time (slack trigger)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const dataBuffer = Buffer.from(JSON.stringify($json));\n\nreturn [\n  {\n    json: {},\n    binary: {\n      data: {\n        data: dataBuffer\n      }\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        304
+      ],
+      "id": "baf1def6-9e4c-409c-9ffe-ffc61c4e7c0a",
+      "name": "Format the time stamp"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "/tmp/slack_trigger_time.json",
+        "dataPropertyName": "=data",
+        "options": {
+          "append": false
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        768,
+        304
+      ],
+      "id": "e9017833-4dea-447e-a31d-4cf0a86573f6",
+      "name": "Storing timestamp in a file",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://vexa-local.mylab.com/bots",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "<vexa-api-key>"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "platform",
+              "value": "google_meet"
+            },
+            {
+              "name": "native_meeting_id",
+              "value": "={{ $('Capture Incident Start time (slack trigger)').item.json.meetingId }}"
+            },
+            {
+              "name": "language",
+              "value": "en"
+            },
+            {
+              "name": "bot_name",
+              "value": "On Call Agent"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        992,
+        304
+      ],
+      "name": "Send On call Agent bot to a meeting",
+      "id": "ce470fb3-ce26-4900-9cf3-5203e04f5bd5"
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        304
+      ],
+      "name": "Wait for 15 seconds to make the bot join the meeting",
+      "id": "7753f7d4-701d-44ba-a269-a61cb1a869b1",
+      "webhookId": "64f9a141-d98c-4f75-9af2-57c201428d6b"
+    },
+    {
+      "parameters": {
+        "url": "=http://vexa-local.mylab.com/transcripts/google_meet/{{ $('Capture Incident Start time (slack trigger)').item.json.meetingId }}",
+        "options": {
+          "fullResponse": true
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "X-API-Key",
+              "value": "<vexa-api-key>"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1648,
+        304
+      ],
+      "id": "2e6249cf-3331-468b-b35b-079dce25f6b6",
+      "name": "Get Transcripts from the meeting1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// const segments = $json.segments || $json.body?.segments || [];\n\n// function formatTimestampToIST(utcTimestamp) {\n//   const date = new Date(utcTimestamp);\n//   // Offset for IST (+05:30)\n//   const offset = 5.5 * 60; // in minutes\n//   const istDate = new Date(date.getTime() + offset * 60000);\n\n//   const hh = String(istDate.getHours()).padStart(2, '0');\n//   const mm = String(istDate.getMinutes()).padStart(2, '0');\n//   const ss = String(istDate.getSeconds()).padStart(2, '0');\n\n//   return `${hh}:${mm}:${ss}`;\n// }\n\n// const formatted = segments.map(seg => {\n//   const timestampRaw = seg.absolute_start_time || seg.start_time || seg.startTime || 'timestamp not available';\n  \n//   let timestamp = 'timestamp not available';\n//   if (timestampRaw !== 'timestamp not available') {\n//     timestamp = formatTimestampToIST(timestampRaw);\n//   }\n\n//   const text = seg.text?.trim() || '';\n\n//   return `- ${timestamp}: ${text}`;\n// }).join('\\n');\n\n// const speakers = new Set(segments.map(s => s.speaker).filter(Boolean));\n// const emptyMeeting = speakers.size <= 1;\n\n// return [{ json: { transcriptFormatted: formatted, emptyMeeting } }];\nconst segments = $json.segments || $json.body?.segments || [];\n\nfunction formatTimestampToIST(utcTimestamp) {\n  const date = new Date(utcTimestamp);\n  // Offset for IST (+05:30)\n  const offset = 5.5 * 60; // in minutes\n  const istDate = new Date(date.getTime() + offset * 60000);\n\n  const hh = String(istDate.getHours()).padStart(2, '0');\n  const mm = String(istDate.getMinutes()).padStart(2, '0');\n  const ss = String(istDate.getSeconds()).padStart(2, '0');\n\n  return `${hh}:${mm}:${ss}`;\n}\n\n// Build 1️⃣ transcript with timestamp + text\nconst formatted = segments.map(seg => {\n  const timestampRaw = seg.absolute_start_time || seg.start_time || seg.startTime || 'timestamp not available';\n  \n  let timestamp = 'timestamp not available';\n  if (timestampRaw !== 'timestamp not available') {\n    timestamp = formatTimestampToIST(timestampRaw);\n  }\n\n  const text = seg.text?.trim() || '';\n  return `- ${timestamp}: ${text}`;\n}).join('\\n');\n\n// Build 2️⃣ transcript with text only\nconst textOnly = segments\n  .map(seg => seg.text?.trim() || '')\n  .filter(Boolean)\n  .join(' ')\n  .trim();\n\nconst speakers = new Set(segments.map(s => s.speaker).filter(Boolean));\nconst emptyMeeting = speakers.size <= 1;\n\n// ✅ Return two outputs\nreturn [{\n  json: {\n    transcriptFormatted: formatted,   // \"- 12:01:00: foo\"\n    transcriptTextOnly: textOnly,     // \"foo bar baz\"\n    emptyMeeting\n  }\n}];\n"
+      },
+      "id": "74211974-fcc5-4743-b091-8648c113f14d",
+      "name": "Format Transcripts received from bot1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "content",
+              "value": "={{ $json.transcriptFormatted }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d2f480ee-0117-4192-95d1-64e4d78431d1",
+      "name": "Read the transcripts1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B09N7KY94NP/BF1EmwTxWKNrVmR3WL9h41tg",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify({\n  text: \"Approval request\",\n  blocks: [\n    {\n      type: \"section\",\n      text: { type: \"mrkdwn\", text: $json.text || \"No message\" }\n    },\n    {\n      type: \"actions\",\n      elements: [\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Approve\" },\n          style: \"primary\",\n          action_id: \"approve_btn\",\n          value: JSON.stringify({ flow: \"rca\" })    // 👈 add this\n        },\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Edit\" },\n          action_id: \"edit_btn\",\n          value: JSON.stringify({ flow: \"rca\" })    // 👈 add this\n        },\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Deny\" },\n          style: \"danger\",\n          action_id: \"deny_btn\",\n          value: JSON.stringify({ flow: \"rca\" })    // 👈 add this\n        }\n      ]\n    }\n  ]\n}) }}\n"
+      },
+      "name": "Send slack message for approval1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        2960,
+        304
+      ],
+      "id": "102cf90f-1ebe-413a-8836-1c2e210d450e"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- Clean summary: remove bullet markers and collapse newlines to spaces ---\nlet raw = String($json.content || $json.transcriptTextOnly || $json.transcriptFormatted || \"\").trim();\n\n\n// Strip timestamp prefixes like \"- 13:05:35: \" and lone HH:MM:SS (belt & suspenders)\nraw = raw\n  .replace(/^\\s*-\\s*\\d{2}:\\d{2}:\\d{2}:\\s*/gm, \"\")  // \"- HH:MM:SS: \"\n  .replace(/\\b\\d{2}:\\d{2}:\\d{2}\\b/g, \"\")           // bare \"HH:MM:SS\"\n  .replace(/^\\s*([-•*–]|(\\d+)[.)])\\s+/gm, \"\")      // leading bullets\n  .replace(/\\n+/g, \" \")\n  .replace(/\\s{2,}/g, \" \")\n  .trim();\n\n\n// Optional clamp to keep prompt smaller (Slack/LLM safety)\nconst INCIDENT_TEXT = raw.slice(0, 8000);\n\n\nconst title =$('Capture Incident Start time (slack trigger)').first().json.title || \"TBD\";\nconst priority = $('Capture Incident Start time (slack trigger)').first().json.priority || \"TBD\";\nconst meetingUrl = $('Capture Incident Start time (slack trigger)').first().json.meetingUrl  || \"TBD\";\nconst incidentLink = $('Capture Incident Start time (slack trigger)').first().json.incidentLink || \"TBD\";\nconst triggerTime = $('Capture Incident Start time (slack trigger)').first().json.triggerTime ;\n\n\n// === Format date/time ===\n\nlet t = $('Capture Incident Start time (slack trigger)').first().json.triggerTime;\nif (!t) t = new Date().toISOString();\nconst dt = new Date(t);\n\n\n// UTC (ISO parts)\nconst dateUTC = dt.toISOString().slice(0, 10);     // \"YYYY-MM-DD\"\nconst timeUTC = dt.toISOString().slice(11, 19);    // \"HH:MM:SS\"\n\n// IST (Asia/Kolkata)\nconst istDateFmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'\n});\nconst istTimeFmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false\n});\nconst dateIST = istDateFmt.format(dt).split('/').reverse().join('-'); // \"YYYY-MM-DD\"\nconst timeIST = istTimeFmt.format(dt);                                // \"HH:MM:SS\"\n\n\n// === Build the summarisation prompt ===\nconst summarizationPrompt = `\nYou are an Incident Comms Formatter.\n\nTASK:\nFrom the INCIDENT TEXT, produce the FINAL OUTPUT exactly in the template below.\nRules:\n- \"Incident Summary\" must be a single concise paragraph (no bullets, no numbered lists, no timestamps, no code blocks).\n- Use clear, plain language.\n- Fill fields if inferable; otherwise use \"TBD\".\n- Keep underscores and asterisks used for Slack bold/italics exactly as shown.\n- Do not add extra sections or commentary.\n\nINCIDENT TEXT:\n<<<\n${INCIDENT_TEXT}\n>>>\n\nFINAL OUTPUT (fill the fields):\n*INITIAL INCIDENT SUMMARY*\n\n_*Title:*_ ${title}\n_*Incident Summary:*_ [Write a single paragraph here—no bullets, no timestamps.]\n\n_*Incident ID:*_ TBD\n_*Status:*_ Investigating\n_*War-room Link:*_ ${meetingUrl}\n_*Incident Source:*_ TBD\n_*Incident Severity:*_ ${priority}\n_*Impact Assessment:*_\n*Technical/System Impact:* TBD\n*Business/Customer Impact:* TBD\n_*Impact Quantification:*_\n*Quantification From System:* TBD\n*Customer Reachouts:* TBD\n_*Mitigation Status:*_ TBD\n_*War room issue classification:*_ Code fix or HLL config or Connector config or platform config or 3rd party or operator X config\n_*Incident raised at (Date/Time):*_ ${dateIST} ${timeIST} IST\n_*Next Update:*_ 30 mins\n`;\n\n\n// === Output this so it can be passed into Summarization node ===\nreturn [{\n  json: {\n    prompt: summarizationPrompt,\n    // expose fields if you need them downstream\n    triggerTime,\n    dateUTC,\n    timeUTC,\n    dateIST,\n    timeIST,\n    incidentTextPreview: INCIDENT_TEXT.slice(0, 500),\n    title,\n    priority,\n    meetingUrl,\n    incidentLink\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2368,
+        304
+      ],
+      "id": "563643a3-b214-445c-a2e2-4517765dc3c3",
+      "name": "RCA template / Prompt creation1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2608,
+        304
+      ],
+      "id": "fb439617-50be-44fa-b607-9887b7d2f004",
+      "name": "Create RCA based on summary provided1"
+    },
+    {
+      "parameters": {
+        "model": "gpt-5",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2656,
+        512
+      ],
+      "id": "e90cd20f-9c06-49be-a8a7-04042716f66d",
+      "name": "Azure OpenAI Chat Model5"
+    },
+    {
+      "parameters": {
+        "resource": "reaction",
+        "channelId": {
+          "__rl": true,
+          "value": "C0904NQPWMB",
+          "mode": "list",
+          "cachedResultName": "incident-page"
+        },
+        "timestamp": "={{ $json.ts }}",
+        "name": "eyes"
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        304,
+        80
+      ],
+      "id": "197316d4-5c74-4242-b15d-9c8da0c3bbc1",
+      "name": "Acknowledge the message",
+      "webhookId": "58959435-64a1-4cee-a564-d3c2ce030913"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "get-approval-response",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        96,
+        2128
+      ],
+      "id": "b300c721-95f1-4cb8-90fe-90956ae3b3b8",
+      "name": "Webhook: Slack interactive",
+      "webhookId": "ba621da1-af76-4000-817d-418e54226918"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const payloadStr = item.json.body?.payload;\n  if (!payloadStr) return { json: { error: 'No payload received' } };\n\n  let p; try { p = JSON.parse(payloadStr); } \n  catch (e) { return { json: { error: 'Invalid JSON in payload', details: e.message } }; }\n\n  const type = p.type; // block_actions | view_submission\n\n  // extract original text from blocks if present\n  const original_blocks = p.message?.blocks || [];\n  let original_message_text = \"\";\n  for (const b of original_blocks) {\n    if (b.type === 'section' && b.text?.text) { original_message_text = b.text.text; break; }\n  }\n  if (!original_message_text) original_message_text = p.message?.text || \"\";\n\n  const response_url = p.response_url || p.response_urls?.[0]?.url || null;\n  const channel = p.channel?.id || p.container?.channel_id || null;\n  const message_ts = (p.message && p.message.ts) || p.container?.message_ts || null;\n\n  // defaults\n  let flow = \"incident\";\n  let action_id = null, action_value = null, trigger_id = null, message = null;\n  let edited_text = null, private_metadata = null;\n\n  if (type === 'block_actions') {\n    action_id  = p.actions?.[0]?.action_id || null;\n    action_value = p.actions?.[0]?.value || null;\n    trigger_id = p.trigger_id || null;\n    message = original_message_text;\n    // parse flow from button value if JSON\n    try {\n      const tag = action_value ? JSON.parse(action_value) : {};\n      if (tag && typeof tag === 'object' && tag.flow) flow = String(tag.flow);\n    } catch {}\n  }\n\n  if (type === 'view_submission') {\n    private_metadata = p.view?.private_metadata || null;\n    try {\n      const meta = JSON.parse(private_metadata || \"{}\");\n      if (meta.flow) flow = String(meta.flow);\n    } catch {}\n    const values = p.view?.state?.values || {};\n    const block = values['edit_block'] || {};\n    const input = block['edit_input'] || {};\n    edited_text = input.value || '';\n  }\n\n  return {\n    json: {\n      type,\n      action_id,\n      action_value,\n      flow,\n      trigger_id,\n      response_url,\n      channel,\n      message_ts,\n      message,\n      private_metadata,\n      edited_text,\n      original_blocks,\n      original_message_text,\n      raw: p\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        2128
+      ],
+      "id": "d1d5da3a-98bc-40af-a575-67bc31c42890",
+      "name": "Parse payload (+flow)"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "block_actions",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "7555090a-cbd1-4633-8606-20c7bc473d06"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "block_actions"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "view_submission",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "327bd3a2-e2a8-45f6-a1e8-b404c45ac5fe"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "view_submission"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        528,
+        2128
+      ],
+      "id": "04c1dc91-660c-4818-aece-3cac5752c761",
+      "name": "Switch: type"
+    },
+    {
+      "parameters": {
+        "jsCode": "const cleaned = ($json.original_blocks || []).filter(b => b.type !== 'actions');\nreturn [{ json: { response_url: $json.response_url, cleaned_blocks: cleaned, original_message_text: $json.original_message_text,\n  // passthrough\n  action_id: $json.action_id, flow: $json.flow, trigger_id: $json.trigger_id, channel: $json.channel, message_ts: $json.message_ts, message: $json.message } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        1952
+      ],
+      "id": "f47c9f86-5077-41a0-8813-66a7285ec702",
+      "name": "Strip action buttons"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        992,
+        1952
+      ],
+      "id": "cb933bd5-5fc0-4adb-a802-8c9ca73b5d66",
+      "name": "Update parent (response_url)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1184,
+        1776
+      ],
+      "id": "be12963c-49ad-4f55-8c6f-9303ed225186",
+      "name": "ACK block_actions"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Parse payload (+flow)').item.json.action_id }}",
+                    "rightValue": "approve_btn",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "cce31242-c97b-426a-ad6c-8a5f0e679255"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "approve_btn"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Parse payload (+flow)').item.json.action_id }}",
+                    "rightValue": "deny_btn",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "64679095-2158-4407-a654-ecc739d48f33"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "deny_btn"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Parse payload (+flow)').item.json.action_id }}",
+                    "rightValue": "edit_btn",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "bb2c2f3d-6f20-4390-b9ef-ff45c9ff7160"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "edit_btn"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1264,
+        1936
+      ],
+      "id": "96c51584-532a-4fd6-829d-42c2e8e65194",
+      "name": "Switch: action_id"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Parse payload (+flow)').item.json.flow }}",
+                    "rightValue": "rca",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "b73ac1eb-c75a-438e-ae8d-ce0503b79971"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rca"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Parse payload (+flow)').item.json.flow }}",
+                    "rightValue": "incident",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "44ca5227-675d-470d-89a7-3199490bb489"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "incident"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1536,
+        1856
+      ],
+      "id": "1a617824-ef3d-4e36-b0c5-0434edd83fa7",
+      "name": "Switch: flow (rca vs incident)"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<slack channel ID>/<slack webhook ID>",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify({\n  text: $('Strip action buttons').item.json.original_message_text || \"No message\"\n}) }}\n"
+      },
+      "name": "Approved → RCA page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        1728
+      ],
+      "id": "2582ead1-c747-4bbe-954f-003f92a36b7e"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B091JES041M/rWmkDF7HCLiuAgXSjm8kbGvc",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify({\n  text: $('Strip action buttons').item.json.original_message_text || \"No message\"\n}) }}\n"
+      },
+      "name": "Approved → Incident page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        1920
+      ],
+      "id": "ec715373-447a-490f-bdc2-262a1a5a36af"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B091ZDVF9D0/AKzCvgoZmODBmIQAV1iz19Yy",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "{ \"text\": \"Approval Denied\" }"
+      },
+      "name": "Deny → Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        2048
+      ],
+      "id": "96abc606-8607-4325-a750-a8dc859e59c1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1584,
+        2224
+      ],
+      "id": "8d4465ff-bb51-42fc-a925-d4d12a94bfa1",
+      "name": "Edit → views.open"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"response_action\":\"clear\"}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        800,
+        2512
+      ],
+      "id": "e4e4ac13-eef4-429f-a371-b5a4113802ca",
+      "name": "ACK view_submission"
+    },
+    {
+      "parameters": {
+        "jsCode": "const metaStr = $json.private_metadata || '{}';\nlet meta = {};\ntry { meta = JSON.parse(metaStr); } catch (e) {}\nreturn [{ json: { channel: meta.channel || null, thread_ts: meta.thread_ts || null, flow: meta.flow || 'incident', edited_text: $json.edited_text || '' } }];\n\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        2208
+      ],
+      "id": "961db795-4a3a-4a54-bdb8-328ef13b7908",
+      "name": "Extract modal fields"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1264,
+        2224
+      ],
+      "id": "0d0a3241-7605-4061-9bc4-44c7feb80a3c",
+      "name": "ACK after post"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1056,
+        2224
+      ],
+      "id": "4dc94c1b-11e2-4426-a7e6-753b293e69f2",
+      "name": "Post edited (thread)"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B091JES041M/rWmkDF7HCLiuAgXSjm8kbGvc",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ {\n  text: $json.edited_text || 'No message'\n} }}"
+      },
+      "name": "edited→ Incident page1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1408,
+        2512
+      ],
+      "id": "8757ec72-bda5-461e-8422-bdc58518ac06"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<slack channel ID>/<slack webhook ID>",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ {\n  text: $json.edited_text || 'No message'\n} }}"
+      },
+      "name": "edited→ RCA page1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        1392,
+        2688
+      ],
+      "id": "b7c5db66-97a0-409f-b023-892179bda542"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.flow }}",
+                    "rightValue": "incident",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "fb59814c-cf28-4988-a69f-609a0a32c7ca"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "incident"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "7f8e95b7-9e1e-4e41-a190-68214ccac673",
+                    "leftValue": "={{ $json.flow }}",
+                    "rightValue": "rca",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "rca"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        1152,
+        2608
+      ],
+      "id": "e1977ccd-5ac3-4fa8-95e8-827c9b2abe76",
+      "name": "Switch3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.botRunning }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        992
+      ],
+      "id": "fa7c0242-f32a-4c4d-bc3f-521fe4506ef9",
+      "name": "IF Bot Running"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { message: 'Bot is not running. Skipping transcript.' } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        1200
+      ],
+      "id": "5e7da0e4-1fed-4bf8-bc6b-9f587e469180",
+      "name": "Bot Not Running Log"
+    },
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "custom",
+              "cronExpression": "*/5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "baae9298-6c98-4d9d-86fc-be427f006cc1",
+      "name": "Summary Cron trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        32,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://vexa-local.mylab.com/bots/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "<vexa-api-key>"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        992
+      ],
+      "id": "e92caf4c-bd39-4c27-8c65-f859f7b2c3a8",
+      "name": "Get On Call Agent Bot Status"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract bots array properly from running_bots\nconst bots = $json.running_bots || [];\n\n// Check if any bot matches platform: google_meet and status includes \"Up\"\nconst isRunning = bots.some(bot =>\n  bot.platform === \"google_meet\" &&\n  typeof bot.status === \"string\" &&\n  bot.status.startsWith(\"Up\")\n);\n\nreturn [{ json: { botRunning: isRunning, rawStatus: bots } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        992
+      ],
+      "id": "20ee465b-71ff-462e-92cd-667858e83b3f",
+      "name": "Check if On-Call Bot is Running"
+    },
+    {
+      "parameters": {
+        "url": "=http://vexa-local.mylab.com/transcripts/google_meet/{{ $('Extract time stamp from the previous file1').item.json.data.meetingId }}",
+        "options": {
+          "fullResponse": true
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "X-API-Key",
+              "value": "<vexa-api-key>"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        976
+      ],
+      "id": "acafb20d-3dd9-4fb8-9bae-617d5347f547",
+      "name": "Get Transcripts from the meeting"
+    },
+    {
+      "parameters": {
+        "jsCode": "const segments = $json.segments || $json.body?.segments || [];\n\nfunction formatTimestampToIST(utcTimestamp) {\n  const date = new Date(utcTimestamp);\n  // Offset for IST (+05:30)\n  const offset = 5.5 * 60; // in minutes\n  const istDate = new Date(date.getTime() + offset * 60000);\n\n  const hh = String(istDate.getHours()).padStart(2, '0');\n  const mm = String(istDate.getMinutes()).padStart(2, '0');\n  const ss = String(istDate.getSeconds()).padStart(2, '0');\n\n  return `${hh}:${mm}:${ss}`;\n}\n\nconst formatted = segments.map(seg => {\n  const timestampRaw = seg.absolute_start_time || seg.start_time || seg.startTime || 'timestamp not available';\n  \n  let timestamp = 'timestamp not available';\n  if (timestampRaw !== 'timestamp not available') {\n    timestamp = formatTimestampToIST(timestampRaw);\n  }\n\n  const text = seg.text?.trim() || '';\n\n  return `- ${timestamp}: ${text}`;\n}).join('\\n');\n\nconst speakers = new Set(segments.map(s => s.speaker).filter(Boolean));\nconst emptyMeeting = speakers.size <= 1;\n\nreturn [{ json: { transcriptFormatted: formatted, emptyMeeting } }];\n"
+      },
+      "id": "ef65d684-c187-4856-8cf1-91513d7a8fd4",
+      "name": "Format Transcripts received from bot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "content",
+              "value": "={{ $json.transcriptFormatted }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d586e23a-fdf9-4674-ba36-bf20309d3fdb",
+      "name": "Read the transcripts",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [
+        1728,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B09N7KY94NP/BF1EmwTxWKNrVmR3WL9h41tg",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify({\n  text: $json.summaryOneLine || \"No message\",\n  blocks: [\n    {\n      type: \"section\",\n      text: {\n        // use \"mrkdwn\" if you want Slack formatting\n        type: \"mrkdwn\",\n        text: $json.output?.text || $json.summaryOneLine || \"No message\"\n      }\n    },\n    {\n      type: \"actions\",\n      elements: [\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Approve\" },\n          style: \"primary\",\n          action_id: \"approve_btn\",\n          value: \"{\\\"flow\\\":\\\"incident\\\"}\"   // or {\"flow\":\"rca\"} if this is RCA\n        },\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Edit Message\" },\n          action_id: \"edit_btn\",\n          value: \"{\\\"flow\\\":\\\"incident\\\"}\"   // keep flow consistent\n        },\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Deny\" },\n          style: \"danger\",\n          action_id: \"deny_btn\",\n          value: \"{\\\"flow\\\":\\\"incident\\\"}\"\n        }\n      ]\n    }\n  ]\n}) }}\n"
+      },
+      "name": "Send slack message for approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        3376,
+        976
+      ],
+      "id": "01eca16a-3e85-4673-84bc-b8850323dd4d"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/tmp/slack_trigger_time.json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        240,
+        992
+      ],
+      "id": "4307562b-5858-43a5-ae6e-5736f334eaf1",
+      "name": "Read the incident start time file1"
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        448,
+        992
+      ],
+      "id": "99c71061-1de4-4368-bdba-6594bb6381c3",
+      "name": "Extract time stamp from the previous file1"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/tmp/slack_trigger_time.json",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        976
+      ],
+      "id": "36a722ba-1844-49ea-8a11-46c320334424",
+      "name": "Read the incident start time file3"
+    },
+    {
+      "parameters": {
+        "operation": "fromJson",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        2160,
+        976
+      ],
+      "id": "2690e248-582a-48cc-be91-e7d417ac03df",
+      "name": "Extract time stamp from the previous file3"
+    },
+    {
+      "parameters": {
+        "jsCode": "// --- Clean summary: remove bullet markers and collapse newlines to spaces ---\nlet raw = String($('Read the transcripts').first().json.transcriptFormatted).trim();\n\n\n// Strip timestamp prefixes like \"- 13:05:35: \" and lone HH:MM:SS (belt & suspenders)\nraw = raw\n  .replace(/^\\s*-\\s*\\d{2}:\\d{2}:\\d{2}:\\s*/gm, \"\")  // \"- HH:MM:SS: \"\n  .replace(/\\b\\d{2}:\\d{2}:\\d{2}\\b/g, \"\")           // bare \"HH:MM:SS\"\n  .replace(/^\\s*([-•*–]|(\\d+)[.)])\\s+/gm, \"\")      // leading bullets\n  .replace(/\\n+/g, \" \")\n  .replace(/\\s{2,}/g, \" \")\n  .trim();\n\n\n// Optional clamp to keep prompt smaller (Slack/LLM safety)\nconst INCIDENT_TEXT = raw.slice(0, 8000);\n\n\nconst title = $input.first().json.data.title;\nconst priority =$input.first().json.data.priority ;\nconst meetingUrl = $input.first().json.data.meetingUrl  || \"TBD\";\nconst incidentLink = $input.first().json.data.incidentLink|| \"TBD\";\nconst triggerTime =  $input.first().json.data.triggerTime;\n\n\n// === Format date/time ===\n\nlet t = $input.first().json.data.triggerTime;\nif (!t) t = new Date().toISOString();\nconst dt = new Date(t);\n\n\n// UTC (ISO parts)\nconst dateUTC = dt.toISOString().slice(0, 10);     // \"YYYY-MM-DD\"\nconst timeUTC = dt.toISOString().slice(11, 19);    // \"HH:MM:SS\"\n\n// IST (Asia/Kolkata)\nconst istDateFmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'\n});\nconst istTimeFmt = new Intl.DateTimeFormat('en-GB', {\n  timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false\n});\nconst dateIST = istDateFmt.format(dt).split('/').reverse().join('-'); // \"YYYY-MM-DD\"\nconst timeIST = istTimeFmt.format(dt);                                // \"HH:MM:SS\"\n\n\n// === Build the summarisation prompt ===\nconst summarizationPrompt = `\nYou are an Incident Comms Formatter.\n\nTASK:\nFrom the INCIDENT TEXT, produce the FINAL OUTPUT exactly in the template below.\nRules:\n- \"Incident Summary\" must be a single concise paragraph (no bullets, no numbered lists, no timestamps, no code blocks).\n- Use clear, plain language.\n- Fill fields if inferable; otherwise use \"TBD\".\n- Keep underscores and asterisks used for Slack bold/italics exactly as shown.\n- Do not add extra sections or commentary.\n\nINCIDENT TEXT:\n<<<\n${INCIDENT_TEXT}\n>>>\n\nFINAL OUTPUT (fill the fields):\n*INITIAL INCIDENT SUMMARY*\n\n_*Title:*_ ${title}\n_*Incident Summary:*_ [Write a single paragraph here—no bullets, no timestamps.]\n\n_*Incident ID:*_ TBD\n_*Status:*_ Investigating\n_*War-room Link:*_ ${meetingUrl}\n_*Incident Source:*_ TBD\n_*Incident Severity:*_ ${priority}\n_*Impact Assessment:*_\n*Technical/System Impact:* TBD\n*Business/Customer Impact:* TBD\n_*Impact Quantification:*_\n*Quantification From System:* TBD\n*Customer Reachouts:* TBD\n_*Mitigation Status:*_ TBD\n_*War room issue classification:*_ Code fix or HLL config or Connector config or platform config or 3rd party or operator X config\n_*Incident raised at (Date/Time):*_ ${dateIST} ${timeIST} IST\n_*Next Update:*_ 30 mins\n`;\n\n\n// === Output this so it can be passed into Summarization node ===\nreturn [{\n  json: {\n    prompt: summarizationPrompt,\n    // expose fields if you need them downstream\n    triggerTime,\n    dateUTC,\n    timeUTC,\n    dateIST,\n    timeIST,\n    incidentTextPreview: INCIDENT_TEXT.slice(0, 500),\n    title,\n    priority,\n    meetingUrl,\n    incidentLink\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2352,
+        976
+      ],
+      "id": "03b240f9-2179-40dd-b3d2-176b074cae92",
+      "name": "RCA template / Prompt creation2"
+    },
+    {
+      "parameters": {
+        "model": "gpt-5",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAzureOpenAi",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        1152
+      ],
+      "id": "1fdf4e02-693f-43e7-a7f0-471ed6ad5181",
+      "name": "Azure OpenAI Chat Model6"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        2592,
+        976
+      ],
+      "id": "b1b384f6-1b8e-434e-807c-2171790f5067",
+      "name": "summarize - 30 min update"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B09N7KY94NP/BF1EmwTxWKNrVmR3WL9h41tg",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify({\n  text: \"Approval request\",\n  blocks: [\n    {\n      type: \"section\",\n      text: { type: \"mrkdwn\", text: $json.text || \"No message\" }\n    },\n    {\n      type: \"actions\",\n      elements: [\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Approve\" },\n          style: \"primary\",\n          action_id: \"approve_btn\",\n          value: JSON.stringify({ flow: \"rca\" })    // 👈 add this\n        },\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Edit\" },\n          action_id: \"edit_btn\",\n          value: JSON.stringify({ flow: \"rca\" })    // 👈 add this\n        },\n        {\n          type: \"button\",\n          text: { type: \"plain_text\", text: \"Deny\" },\n          style: \"danger\",\n          action_id: \"deny_btn\",\n          value: JSON.stringify({ flow: \"rca\" })    // 👈 add this\n        }\n      ]\n    }\n  ]\n}) }}\n"
+      },
+      "name": "30 min rca",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        2928,
+        976
+      ],
+      "id": "5a27c243-a249-4feb-b7c2-31885d374e9c"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input: item.json.text contains the whole formatted message\n// Output: { summary, summaryOneLine }  (both strings)\n\nconst raw = String($('summarize - 30 min update').first().json.text || '')\n  .replace(/\\r/g, '')        // normalize newlines\n  .replace(/\\u00A0/g, ' ');  // non-breaking spaces → space\n\n// Build a regex that tolerates the different decorations around the label:\n// \"*Incident Summary:*\", \"_*Incident Summary:*_\", \"Incident Summary:\", etc.\n// It captures everything after the label up to the next known label or end of text.\nconst label = '(?:[_*]{0,2}\\\\s*Incident\\\\s+Summary\\\\s*:[_*]{0,2})';\nconst nextLabels = [\n  'Title', 'Incident ID', 'Status', 'War-room Link', 'War room Link',\n  'Incident Source', 'Incident Severity', 'Impact Assessment',\n  'Impact Quantification', 'Mitigation Status', 'Next Update'\n];\n\n// Build a lookahead that matches the next label line\nconst next = `\\\\n\\\\s*(?:[_*]{0,2}\\\\s*(?:${nextLabels.join('|')})\\\\s*:[_*]{0,2})`;\n\n// Final regex: grab everything after the Incident Summary label, lazily,\n// until the next label or end of string.\nconst re = new RegExp(`${label}\\\\s*(.+?)(?=${next}|$)`, 'is');\n\nlet summary = '';\nconst m = raw.match(re);\nif (m) {\n  summary = m[1].trim();\n}\n\n// Clean up bullets and extra spacing for a one-line version\nconst summaryOneLine = summary\n  .replace(/^\\\\s*([-•*–]|\\\\d+[.)])\\\\s+/gm, '') // strip leading bullet markers\n  .replace(/`+/g, '')                          // strip backticks if any\n  .replace(/[ \\\\t]*\\\\n[ \\\\t]*/g, ' ')          // collapse newlines → space\n  .replace(/\\\\s{2,}/g, ' ')                    // collapse multiple spaces\n  .trim();\n\nreturn [{\n  json: {\n    summary,\n    summaryOneLine\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3136,
+        976
+      ],
+      "id": "b635b736-3bf3-4e32-8ef1-84b6e2adf096",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.rcaPrompt }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        3312,
+        4032
+      ],
+      "id": "26a520eb-ae37-473b-9666-5302104e5df0",
+      "name": "Create RCA"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<slack channel ID>/<slack webhook ID>",
+        "responseFormat": "string",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ JSON.stringify({ text: $json[\"text\"] }) }}\n"
+      },
+      "name": "Post summary in rca channel (Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        4032
+      ],
+      "id": "c9e55fe0-116d-497a-bece-fe20123f7ead"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Stop On call Agent Bot Webhook": {
+      "main": [
+        [
+          {
+            "node": "Remove On call Agent from the meeting1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Notification on workflow start for removing bot from meeting": {
+      "main": [
+        [
+          {
+            "node": "Get On Call Agent Transcript for RCA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Transcript to create RCA": {
+      "main": [
+        [
+          {
+            "node": "Reading Transcripts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reading Transcripts": {
+      "main": [
+        [
+          {
+            "node": "Summarize transcripts to create summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Predict end time based on summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RCA template / Prompt creation": {
+      "main": [
+        [
+          {
+            "node": "Create RCA based on summary provided",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summarize transcripts to create summary": {
+      "main": [
+        [
+          {
+            "node": "RCA template / Prompt creation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read the incident start time file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create RCA based on summary provided": {
+      "main": [
+        [
+          {
+            "node": "Get action items",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Post RCA in rca channel (Webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get action items": {
+      "main": [
+        [
+          {
+            "node": "Create action items in JIRA project",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the incident start time file": {
+      "main": [
+        [
+          {
+            "node": "Extract time stamp from the previous file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract time stamp from the previous file": {
+      "main": [
+        [
+          {
+            "node": "Merge outputs from previous nodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Predict end time based on summary": {
+      "main": [
+        [
+          {
+            "node": "Merge outputs from previous nodes",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Remove On call Agent from the meeting1": {
+      "main": [
+        [
+          {
+            "node": "Slack Notification on workflow start for removing bot from meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get On Call Agent Transcript for RCA": {
+      "main": [
+        [
+          {
+            "node": "Format Transcript to create RCA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Timestamp and Prompt for RCA summary1": {
+      "main": [
+        [
+          {
+            "node": "Create RCA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge outputs from previous nodes": {
+      "main": [
+        [
+          {
+            "node": "Timestamp and Prompt for RCA summary1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Summarize transcripts to create summary",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Create RCA",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Create RCA based on summary provided",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Bot Running2": {
+      "main": [
+        [
+          {
+            "node": "Wait for 15 seconds to make the bot join the meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Call Agent Mentioned in an Incident": {
+      "main": [
+        [
+          {
+            "node": "Acknowledge the message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Capture Incident Start time (slack trigger)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Capture Incident Start time (slack trigger)": {
+      "main": [
+        [
+          {
+            "node": "Format the time stamp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format the time stamp": {
+      "main": [
+        [
+          {
+            "node": "Storing timestamp in a file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Storing timestamp in a file": {
+      "main": [
+        [
+          {
+            "node": "Send On call Agent bot to a meeting",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send On call Agent bot to a meeting": {
+      "main": [
+        [
+          {
+            "node": "Set Bot Running2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for 15 seconds to make the bot join the meeting": {
+      "main": [
+        [
+          {
+            "node": "Get Transcripts from the meeting1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcripts from the meeting1": {
+      "main": [
+        [
+          {
+            "node": "Format Transcripts received from bot1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Transcripts received from bot1": {
+      "main": [
+        [
+          {
+            "node": "Read the transcripts1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the transcripts1": {
+      "main": [
+        [
+          {
+            "node": "RCA template / Prompt creation1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RCA template / Prompt creation1": {
+      "main": [
+        [
+          {
+            "node": "Create RCA based on summary provided1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create RCA based on summary provided1": {
+      "main": [
+        [
+          {
+            "node": "Send slack message for approval1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Create RCA based on summary provided1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Slack interactive": {
+      "main": [
+        [
+          {
+            "node": "Parse payload (+flow)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse payload (+flow)": {
+      "main": [
+        [
+          {
+            "node": "Switch: type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: type": {
+      "main": [
+        [
+          {
+            "node": "Strip action buttons",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ACK view_submission",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Extract modal fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: action_id": {
+      "main": [
+        [
+          {
+            "node": "Switch: flow (rca vs incident)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Deny → Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: flow (rca vs incident)": {
+      "main": [
+        [
+          {
+            "node": "Approved → RCA page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Approved → Incident page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract modal fields": {
+      "main": [
+        [
+          {
+            "node": "Switch3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch3": {
+      "main": [
+        [
+          {
+            "node": "edited→ Incident page1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "edited→ RCA page1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Bot Running": {
+      "main": [
+        [
+          {
+            "node": "Get Transcripts from the meeting",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Bot Not Running Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary Cron trigger": {
+      "main": [
+        [
+          {
+            "node": "Read the incident start time file1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get On Call Agent Bot Status": {
+      "main": [
+        [
+          {
+            "node": "Check if On-Call Bot is Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if On-Call Bot is Running": {
+      "main": [
+        [
+          {
+            "node": "IF Bot Running",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcripts from the meeting": {
+      "main": [
+        [
+          {
+            "node": "Format Transcripts received from bot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Transcripts received from bot": {
+      "main": [
+        [
+          {
+            "node": "Read the transcripts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the transcripts": {
+      "main": [
+        [
+          {
+            "node": "Read the incident start time file3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the incident start time file1": {
+      "main": [
+        [
+          {
+            "node": "Extract time stamp from the previous file1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract time stamp from the previous file1": {
+      "main": [
+        [
+          {
+            "node": "Get On Call Agent Bot Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the incident start time file3": {
+      "main": [
+        [
+          {
+            "node": "Extract time stamp from the previous file3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract time stamp from the previous file3": {
+      "main": [
+        [
+          {
+            "node": "RCA template / Prompt creation2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RCA template / Prompt creation2": {
+      "main": [
+        [
+          {
+            "node": "summarize - 30 min update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Chat Model6": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "summarize - 30 min update",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "summarize - 30 min update": {
+      "main": [
+        [
+          {
+            "node": "30 min rca",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "30 min rca": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Send slack message for approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create RCA": {
+      "main": [
+        [
+          {
+            "node": "Post summary in rca channel (Webhook)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "cbf7c3b9-ad22-478f-8ced-3b9d71659403",
+  "meta": {
+    "instanceId": "b68ab40189ae918bb7dee28b9a47c22a83162a02ca1f0e02099131208da5fedc"
+  },
+  "id": "arV8hhmqIJTwVaAv",
+  "tags": [
+    {
+      "name": "live",
+      "id": "9EtDVGAFD4j4WFku",
+      "createdAt": "2025-11-17T04:07:39.257Z",
+      "updatedAt": "2025-11-17T04:07:39.257Z"
+    },
+    {
+      "name": "prod",
+      "id": "lJD0tuYhz3Ojep5r",
+      "createdAt": "2025-11-17T04:07:39.267Z",
+      "updatedAt": "2025-11-17T04:07:39.267Z"
+    }
+  ]
+}

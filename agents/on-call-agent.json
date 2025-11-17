@@ -210,7 +210,7 @@
     {
       "parameters": {
         "method": "DELETE",
-        "url": "http://vexa-local.mylab.com/bots/google_meet/dxi-jxgy-zrh",
+        "url": "http://vexa-local.mylab.com/bots/google_meet/abc-xyza-cde",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -233,7 +233,7 @@
     },
     {
       "parameters": {
-        "url": "http://vexa-local.mylab.com/transcripts/google_meet/dxi-jxgy-zrh",
+        "url": "http://vexa-local.mylab.com/transcripts/google_meet/abc-xyza-cde",
         "options": {
           "fullResponse": true
         },
@@ -601,7 +601,7 @@
     {
       "parameters": {
         "requestMethod": "POST",
-        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B09N7KY94NP/BF1EmwTxWKNrVmR3WL9h41tg",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<channel id>/<webhook id>",
         "responseFormat": "string",
         "jsonParameters": true,
         "options": {},
@@ -989,7 +989,7 @@
     {
       "parameters": {
         "requestMethod": "POST",
-        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B091JES041M/rWmkDF7HCLiuAgXSjm8kbGvc",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<channel id>/<webhook id>",
         "responseFormat": "string",
         "jsonParameters": true,
         "options": {},
@@ -1007,7 +1007,7 @@
     {
       "parameters": {
         "requestMethod": "POST",
-        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B091ZDVF9D0/AKzCvgoZmODBmIQAV1iz19Yy",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<channel id>/<webhook id>",
         "responseFormat": "string",
         "jsonParameters": true,
         "options": {},
@@ -1090,7 +1090,7 @@
     {
       "parameters": {
         "requestMethod": "POST",
-        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B091JES041M/rWmkDF7HCLiuAgXSjm8kbGvc",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<channel id>/<webhook id>",
         "responseFormat": "string",
         "jsonParameters": true,
         "options": {},
@@ -1339,7 +1339,7 @@
     {
       "parameters": {
         "requestMethod": "POST",
-        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B09N7KY94NP/BF1EmwTxWKNrVmR3WL9h41tg",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<channel id>/<webhook id>",
         "responseFormat": "string",
         "jsonParameters": true,
         "options": {},
@@ -1455,7 +1455,7 @@
     {
       "parameters": {
         "requestMethod": "POST",
-        "url": "https://hooks.slack.com/services/<slack workspace org ID>/B09N7KY94NP/BF1EmwTxWKNrVmR3WL9h41tg",
+        "url": "https://hooks.slack.com/services/<slack workspace org ID>/<channel id>/<webhook id>",
         "responseFormat": "string",
         "jsonParameters": true,
         "options": {},

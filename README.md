@@ -1,3 +1,4 @@
+![Alt text](documents/images/velai-logo.png)
 # VelAI - SRE On-Call AI Agent
 An intelligent AI-powered agent that automates incident management workflows, generates summaries, and facilitates collaboration during on-call incidents.
 

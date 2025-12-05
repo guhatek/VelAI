@@ -138,7 +138,7 @@ return { json: incident };
 
 **Type:** HTTP Request  
 **Method:** POST  
-**URL:** `https://api.vexa.ai/v1/chat/completions`  
+**URL:** `https://<vexa host>/v1/chat/completions`  
 **Authentication:** Vexa AI Credentials
 
 **Body (JSON):**
@@ -192,7 +192,7 @@ I'll be tracking this thread and providing periodic updates.
 
 **Type:** HTTP Request  
 **Method:** POST  
-**URL:** `https://api.vexa.ai/v1/chat/completions`  
+**URL:** `https://<vexa host>/v1/chat/completions`  
 **Authentication:** Vexa AI Credentials
 
 **Body (JSON):**
@@ -358,13 +358,13 @@ Set these in your n8n instance:
 ```bash
 # Vexa AI Configuration
 VEXA_AI_API_KEY=your_api_key_here
-VEXA_AI_ENDPOINT=https://api.vexa.ai/v1
+VEXA_AI_ENDPOINT=https://<vexa host>/v1
 
 # Slack Configuration
 SLACK_BOT_TOKEN=xoxb-your-token
 SLACK_SIGNING_SECRET=your_signing_secret
-ADMIN_CHANNEL_ID=C0123456789
-INCIDENT_NOTIFICATION_CHANNEL=C9876543210
+ADMIN_CHANNEL_ID=<channel id>
+INCIDENT_NOTIFICATION_CHANNEL=<channel id>
 
 # Workflow Configuration
 SUMMARY_INTERVAL_MINUTES=30
@@ -382,7 +382,7 @@ The workflow uses n8n's workflow static data to maintain state:
     "incident_id_1": {
       "id": "incident_id_1",
       "service": "api-gateway",
-      "channel": "C123456",
+      "channel": "<id>",
       "thread_ts": "1699999999.123456",
       "started_at": "2025-11-10T10:30:00Z",
       "last_summary_at": "2025-11-10T11:00:00Z",

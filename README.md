@@ -57,7 +57,7 @@ An intelligent AI-powered agent that automates incident management workflows, ge
 - **n8n**: Version 1.0.0 or higher
   - Self-hosted or cloud instance
   - Access to create and manage workflows
-- **Vexa AI**: Active account with API access
+- **Vexa**: Local docker setup with API access
   - API key with appropriate permissions
 - **Slack**: 
   - Workspace admin access
@@ -83,10 +83,7 @@ npm install n8n -g
 n8n start
 ```
 
-#### Cloud
-Sign up at [n8n.cloud](https://n8n.cloud) and create a new instance.
-
-### 2. Configure Vexa AI
+### 2. Configure Vexa
 
 1. Setup vexa AI code in Docker container
 2. Navigate to API settings
@@ -127,7 +124,7 @@ Under "Event Subscriptions":
 
 ### 4. Import n8n Workflow
 
-1. Download the workflow file: `sre-oncall-workflow.json`
+1. Download the workflow file: `agent.json` from on-call agent source
 2. In n8n, click "Import from File"
 3. Select the downloaded workflow file
 4. Configure credentials for:

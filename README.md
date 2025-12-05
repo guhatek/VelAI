@@ -24,14 +24,14 @@ An intelligent AI-powered agent that automates incident management workflows, ge
          └───────────┬───────────────┘
                      ▼
          ┌───────────────────────┐
-         │    n8n Workflow       │
+         │        VelAI          │
          │    (Orchestration)    │
          └───────────┬───────────┘
                      │
                      ▼
          ┌───────────────────────┐
-         │     Vexa AI           │
-         │  (LLM Processing)     │
+         │         Vexa          │
+         │   (LLM Processing)    │
          └───────────┬───────────┘
                      │
          ├───────────┼───────────┤
